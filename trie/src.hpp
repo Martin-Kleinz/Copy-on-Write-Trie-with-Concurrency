@@ -30,7 +30,7 @@ class TrieNode {
     TrieNode() = default;
 
     // Create a TrieNode with some children.
-    explicit TrieNode(std::map<char, std::shared_ptr<const TrieNode>> children)
+    explicit TrieNode(std::map<char, std::shared_ptr<TrieNode>> children)
         : children_(std::move(children)) {}
 
     virtual ~TrieNode() = default;
@@ -50,7 +50,7 @@ class TrieNode {
 
     // A map of children, where the key is the next character in the key, and
     // the value is the next TrieNode.
-    std::map<char, std::shared_ptr<const TrieNode>> children_;
+    std::map<char, std::shared_ptr<TrieNode>> children_;
 
     // Indicates if the node is the terminal node.
     bool is_value_node_{false};
@@ -71,7 +71,7 @@ class TrieNodeWithValue : public TrieNode {
     }
 
     // Create a trie node with children and a value.
-    TrieNodeWithValue(std::map<char, std::shared_ptr<const TrieNode>> children,
+    TrieNodeWithValue(std::map<char, std::shared_ptr<TrieNode>> children,
                       std::shared_ptr<T> value)
         : TrieNode(std::move(children)), value_(std::move(value)) {
         this->is_value_node_ = true;
@@ -96,10 +96,10 @@ class TrieNodeWithValue : public TrieNode {
 class Trie {
    private:
     // The root of the trie.
-    std::shared_ptr<const TrieNode> root_{nullptr};
+    std::shared_ptr<TrieNode> root_{nullptr};
 
     // Create a new trie with the given root.
-    explicit Trie(std::shared_ptr<const TrieNode> root)
+    explicit Trie(std::shared_ptr<TrieNode> root)
         : root_(std::move(root)) {}
 
    public:
@@ -124,11 +124,12 @@ class Trie {
         auto current = root_;
         while(i < key.size() && current->children_.find(key[i]) != current->children_.end()) 
         {
-            current = current->children_[key[i]];
+            auto it = current->children_.find(key[i]);
+            current = it->second;
             i++;
         }
         if(i < key.size() || !current->is_value_node_) return nullptr;
-        TrieNodeWithValue* target = dynamic_cast<TrieNodeWithValue*>(current.get());
+        auto target = std::dynamic_pointer_cast<TrieNodeWithValue<T>>(current);
         if (!target || !target->value_) return nullptr;
         if(typeid(target->value_) != typeid(std::shared_ptr<T>)) return nullptr;
         return target->value_.get();
@@ -143,21 +144,47 @@ class Trie {
         if(!root_) newroot = std::shared_ptr<TrieNode>(new TrieNode());
         else
             newroot = std::shared_ptr<TrieNode>(std::move(root_->Clone()));
-
-        for(int i = 0; i < key.size(); ++i)
+        current = newroot;
+        bool exist = true;
+        for(int i = 0; i < key.size() - 1; ++i)
         {
-            if(current->children_.find(key[i]) != current->children_.end())
-                current = current->children_[key[i]];
+            if(exist && current->children_.find(key[i]) != current->children_.end())
+            {
+                current->children_[key[i]] = current->children_[key[i]]->Clone();
+            }
             else 
             {
-
+                exist = false;
+                current->children_[key[i]] = std::shared_ptr<TrieNode>(new TrieNode());
             }
+            current = current->children_[key[i]];
         }
+        auto newval = std::make_shared<T>(std::move(value));
+        if(!exist || current->children_.find(key.back()) == current->children_.end())
+            current->children_[key.back()] = std::shared_ptr<TrieNodeWithValue<T>>(new TrieNodeWithValue(newval));
+        else
+            current->children_[key.back()] = std::shared_ptr<TrieNodeWithValue<T>>(new TrieNodeWithValue(current->children_[key.back()]->children_, newval));
+        return Trie(newroot);
     }
 
     // Remove the key from the trie. If the key does not exist, return the
     // original trie. Otherwise, returns the new trie.
-    auto Remove(std::string_view key) const -> Trie;
+    auto Remove(std::string_view key) const -> Trie
+    {
+        if(!root_) return *this;
+        std::shared_ptr<TrieNode> newroot = std::shared_ptr<TrieNode>(std::move(root_->Clone()));
+        auto current = newroot;
+        for(int i = 0; i < key.size() - 1; ++i)
+        {
+            if(current->children_.find(key[i]) == current->children_.end()) 
+                return *this;
+            current->children_[key[i]] = current->children_[key[i]]->Clone();
+            current = current->children_[key[i]];
+        }
+        if(current->children_.find(key.back()) == current->children_.end()) return *this;
+        current->children_[key.back()] = std::shared_ptr<TrieNode>(new TrieNode(current->children_[key.back()]->children_));
+        return Trie(newroot);
+    }
 };
 
 // This class is used to guard the value returned by the trie. It holds a
