@@ -58,7 +58,7 @@ namespace sjtu
         // Indicates if the node is the terminal node.
         bool is_value_node_{false};
 
-        virtual bool comparevalue(const TrieNode &ohter) const { return false; }
+        //virtual bool comparevalue(const TrieNode &ohter) const { return false; }
 
         // You can add additional fields and methods here. But in general, you don't
         // need to add extra fields to complete this project.
@@ -96,13 +96,13 @@ namespace sjtu
 
         // The value associated with this trie node.
         std::shared_ptr<T> value_;
-        bool comparevalue(const TrieNode &other) const override
-        {
-            auto other_with_value = dynamic_cast<const TrieNodeWithValue<T> *>(&other);
-            if (!other_with_value)
-                return false;
-            return this->value_ == other_with_value->value_;
-        }
+        // bool comparevalue(const TrieNode &other) const override
+        // {
+        //     auto other_with_value = dynamic_cast<const TrieNodeWithValue<T> *>(&other);
+        //     if (!other_with_value)
+        //         return false;
+        //     return this->value_ == other_with_value->value_;
+        // }
     };
 
     // A Trie is a data structure that maps strings to values of type T. All
@@ -119,39 +119,40 @@ namespace sjtu
         // Create a new trie with the given root.
         explicit Trie(std::shared_ptr<TrieNode> root)
             : root_(std::move(root)) {}
+        explicit Trie(std::shared_ptr<TrieNode> root, const bool chg) : root_(std::move(root)), change(chg) {}
 
     public:
         // Create an empty trie.
         Trie() = default;
 
-        bool is_change() {return change;}
-        bool operator!=(const Trie &other) const
-        {
-            return diff(root_, other.root_);
-        }
+        bool is_change() { return change; }
+        // bool operator!=(const Trie &other) const
+        // {
+        //     return diff(root_, other.root_);
+        // }
 
-        bool diff(const std::shared_ptr<TrieNode> &node1, const std::shared_ptr<TrieNode> &node2) const
-        {
-            if (!node1 && !node2)
-                return false;
-            if (!node1 || !node2)
-                return true;
-            if (node1->is_value_node_ != node2->is_value_node_)
-                return true;
-            if (node1->is_value_node_ && !node1->comparevalue(*node2))
-                return true;
-            if (node1->children_.size() != node2->children_.size())
-                return true;
-            for (const auto &pair : node1->children_)
-            {
-                char key = pair.first;
-                auto child1 = pair.second;
-                auto it = node2->children_.find(key);
-                if (it == node2->children_.end() || diff(child1, it->second))
-                    return true;
-            }
-            return false;
-        }
+        // bool diff(const std::shared_ptr<TrieNode> &node1, const std::shared_ptr<TrieNode> &node2) const
+        // {
+        //     if (!node1 && !node2)
+        //         return false;
+        //     if (!node1 || !node2)
+        //         return true;
+        //     if (node1->is_value_node_ != node2->is_value_node_)
+        //         return true;
+        //     if (node1->is_value_node_ && !node1->comparevalue(*node2))
+        //         return true;
+        //     if (node1->children_.size() != node2->children_.size())
+        //         return true;
+        //     for (const auto &pair : node1->children_)
+        //     {
+        //         char key = pair.first;
+        //         auto child1 = pair.second;
+        //         auto it = node2->children_.find(key);
+        //         if (it == node2->children_.end() || diff(child1, it->second))
+        //             return true;
+        //     }
+        //     return false;
+        // }
         // by TA: if you don't need this, just comment out.
 
         // Get the value associated with the given key.
@@ -232,7 +233,7 @@ namespace sjtu
             if (current->children_.find(key.back()) == current->children_.end())
                 return *this;
             current->children_[key.back()] = std::shared_ptr<TrieNode>(new TrieNode(current->children_[key.back()]->children_));
-            return Trie(newroot);
+            return Trie(newroot, true);
         }
     };
 
@@ -306,14 +307,17 @@ namespace sjtu
             snapshots_lock_.lock_shared();
             auto latest = snapshots_.back();
             auto newtrie = std::move(latest.Remove(key));
-            // if (newtrie != latest)
-            // {
-                snapshots_lock_.unlock_shared();
+            size_t size_;
+            snapshots_lock_.unlock_shared();
+            if (newtrie.is_change())
+            {
                 snapshots_lock_.lock();
                 snapshots_.push_back(std::move(newtrie));
-                size_t size_ = snapshots_.size() - 1;
+                size_ = snapshots_.size() - 1;
                 snapshots_lock_.unlock();
-            // }
+            }
+            else
+                size_ = snapshots_.size() - 1;
             write_lock_.unlock();
             return size_;
         }
