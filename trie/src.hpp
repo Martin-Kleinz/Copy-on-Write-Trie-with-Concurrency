@@ -55,6 +55,8 @@ class TrieNode {
     // Indicates if the node is the terminal node.
     bool is_value_node_{false};
 
+    virtual bool comparevalue(const TrieNode& ohter) const {return false;}
+
     // You can add additional fields and methods here. But in general, you don't
     // need to add extra fields to complete this project.
 };
@@ -87,6 +89,12 @@ class TrieNodeWithValue : public TrieNode {
 
     // The value associated with this trie node.
     std::shared_ptr<T> value_;
+    bool comparevalue(const TrieNode& other) const override
+    {
+        auto other_with_value = dynamic_cast<const TrieNodeWithValue<T>*>(&other);
+        if(!other_with_value) return false;
+        return *(this->value_) == *(other_with_value->value_);
+    }
 };
 
 // A Trie is a data structure that maps strings to values of type T. All
@@ -106,9 +114,24 @@ class Trie {
     // Create an empty trie.
     Trie() = default;
 
-    bool operator==(const Trie& other) const
+    bool operator!=(const Trie& other) const 
     {
-        return root_ == other.root_;
+        return diff(root_, other.root_);
+    }
+    
+    bool diff(const std::shared_ptr<TrieNode>& node1, const std::shared_ptr<TrieNode>& node2) const {
+        if (!node1 && !node2) return false;
+        if (!node1 || !node2) return true;
+        if (node1->is_value_node_ != node2->is_value_node_) return true;
+        if (node1->is_value_node_ && !node1->comparevalue(*node2)) return true;
+        if (node1->children_.size() != node2->children_.size()) return true;
+        for (const auto& pair : node1->children_) {
+            char key = pair.first;
+            auto child1 = pair.second;
+            auto it = node2->children_.find(key);
+            if (it == node2->children_.end() || diff(child1, it->second)) return true;
+        }
+        return false;
     }
     // by TA: if you don't need this, just comment out.
 
@@ -212,22 +235,51 @@ class TrieStore {
     // key does not exist in the trie, it will return std::nullopt.
     template <class T>
     auto Get(std::string_view key, size_t version = -1)
-        -> std::optional<ValueGuard<T>>;
+        -> std::optional<ValueGuard<T>>{
+            std::shared_lock<std::shared_mutex> lock(snapshots_lock_);
+            if(version == -1) version = snapshots_.size() - 1;
+            if(version >= snapshots_.size()) return std::nullopt;
+            auto target = snapshots_[version];
+            auto value = target.Get<T>(key);
+            if(!value) return std::nullopt;
+            return ValueGuard<T>(target, *value);
+        }
 
     // This function will insert the key-value pair into the trie. If the key
     // already exists in the trie, it will overwrite the value return the
     // version number after operation Hint: new version should only be visible
     // after the operation is committed(completed)
     template <class T>
-    size_t Put(std::string_view key, T value);
+    size_t Put(std::string_view key, T value)
+    {
+        std::lock_guard<std::mutex> write_lock(write_lock_);
+        std::unique_lock<std::shared_mutex> snapshots_lock(snapshots_lock_);
+        auto latest = snapshots_.back();
+        auto newtrie = latest.Put<T>(key, std::move(value));
+        snapshots_.push_back(newtrie);
+        return snapshots_.size() - 1;
+    }
 
     // This function will remove the key-value pair from the trie.
     // return the version number after operation
     // if the key does not exist, version number should not be increased
-    size_t Remove(std::string_view key);
+    size_t Remove(std::string_view key)
+    {
+        std::lock_guard<std::mutex> write_lock(write_lock_);
+        std::unique_lock<std::shared_mutex> snapshots_lock(snapshots_lock_);
+        auto latest = snapshots_.back();
+        auto newtrie = std::move(latest.Remove(key));
+        if(newtrie != latest)
+            snapshots_.push_back(newtrie);
+        return snapshots_.size() - 1; 
+    }
 
     // This function return the newest version number
-    size_t get_version();
+    size_t get_version()
+    {
+        std::shared_lock<std::shared_mutex> lock(snapshots_lock_);
+        return snapshots_.size() - 1;
+    }
 
    private:
     // This mutex sequences all writes operations and allows only one write
